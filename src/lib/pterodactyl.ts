@@ -127,7 +127,12 @@ class HttpClient {
       return undefined as T;
     }
 
-    return (await res.json()) as T;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json") || contentType.includes("vnd.pterodactyl")) {
+      return (await res.json()) as T;
+    }
+
+    return (await res.text()) as T;
   }
 
   get<T>(path: string, query?: QueryParams) {

@@ -2,6 +2,7 @@
   "name": "pterodactyl-mcp",
   "version": "0.1.0",
   "description": "Pterodactyl MCP server over HTTP",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "pterodactyl-mcp": "dist/index.js"
@@ -16,11 +17,13 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "dotenv": "^17.4.2",
     "express": "^4.21.0",
+    "ws": "^8.20.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },

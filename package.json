@@ -1,0 +1,33 @@
+{
+  "name": "pterodactyl-mcp",
+  "version": "0.1.0",
+  "description": "Pterodactyl MCP server over HTTP",
+  "type": "module",
+  "bin": {
+    "pterodactyl-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -57,7 +57,7 @@ Starts an Express server on the configured port:
 ```bash
 npm start
 # or
-npx pterodactyl-mcp
+npx @duruma/pterodactyl-mcp
 ```
 
 The MCP endpoint is available at `http://localhost:3000/mcp`. A health check is at `/health`.
@@ -67,7 +67,7 @@ The MCP endpoint is available at `http://localhost:3000/mcp`. A health check is 
 For use with MCP clients that communicate over stdin/stdout:
 
 ```bash
-npx pterodactyl-mcp --stdio
+npx @duruma/pterodactyl-mcp --stdio
 ```
 
 ## MCP client configuration
@@ -79,7 +79,7 @@ Add to your MCP client config (e.g. `.mcp.json`, Claude Desktop, etc.):
   "mcpServers": {
     "pterodactyl": {
       "command": "npx",
-      "args": ["pterodactyl-mcp", "--stdio"],
+      "args": ["@duruma/pterodactyl-mcp", "--stdio"],
       "env": {
         "PTERODACTYL_URL": "https://panel.example.com",
         "PTERODACTYL_APP_KEY": "ptla_your_application_key_here",

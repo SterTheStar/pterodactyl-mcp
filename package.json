@@ -1,12 +1,10 @@
 {
-  "name": "pterodactyl-mcp",
-  "version": "0.1.0",
+  "name": "@duruma/pterodactyl-mcp",
+  "version": "0.1.2",
   "description": "Pterodactyl MCP server over HTTP",
   "license": "MIT",
   "type": "module",
-  "bin": {
-    "pterodactyl-mcp": "dist/index.js"
-  },
+  "bin": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",

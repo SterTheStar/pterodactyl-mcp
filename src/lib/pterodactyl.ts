@@ -141,6 +141,46 @@ class HttpClient {
   post<T>(path: string, body?: unknown, query?: QueryParams) {
     return this.request<T>("POST", path, body, query);
   }
+  // Some endpoints (e.g. files/write) expect the raw string as the request
+  // body with a text/plain Content-Type, not a JSON-encoded string.
+  async postRaw<T>(
+    path: string,
+    body: string,
+    query?: QueryParams,
+  ): Promise<T> {
+    const url = new URL(`${this.baseUrl}${path}`);
+    if (query) {
+      for (const [k, v] of Object.entries(query)) {
+        if (v !== undefined) url.searchParams.set(k, String(v));
+      }
+    }
+
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        Accept: "Application/vnd.pterodactyl.v1+json",
+        "Content-Type": "text/plain",
+      },
+      body,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new PterodactylError(res.status, text);
+    }
+
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json") || contentType.includes("vnd.pterodactyl")) {
+      return (await res.json()) as T;
+    }
+
+    return (await res.text()) as T;
+  }
   patch<T>(path: string, body?: unknown) {
     return this.request<T>("PATCH", path, body);
   }
@@ -481,7 +521,7 @@ export class ClientAPI {
   }
 
   writeFile(serverId: string, file: string, content: string) {
-    return this.http.post(
+    return this.http.postRaw(
       `${this.base}/servers/${serverId}/files/write`,
       content,
       { file },

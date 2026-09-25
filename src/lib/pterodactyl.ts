@@ -59,7 +59,7 @@ export class PterodactylError extends Error {
       const parsed = JSON.parse(body);
       const errors = parsed.errors;
       detail = Array.isArray(errors)
-        ? errors.map((e: { detail?: string }) => e.detail).join("; ")
+        ? errors.map((e: { detail?: string }) => e.detail).filter(Boolean).join("; ") || body
         : body;
     } catch {
       detail = body;
@@ -145,7 +145,7 @@ class HttpClient {
   // body with a text/plain Content-Type, not a JSON-encoded string.
   async postRaw<T>(
     path: string,
-    body: string,
+    body: string | Uint8Array,
     query?: QueryParams,
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
@@ -155,6 +155,9 @@ class HttpClient {
       }
     }
 
+    const requestBody = typeof body === "string"
+      ? body
+      : body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
     const res = await fetch(url.toString(), {
       method: "POST",
       headers: {
@@ -162,7 +165,7 @@ class HttpClient {
         Accept: "Application/vnd.pterodactyl.v1+json",
         "Content-Type": "text/plain",
       },
-      body,
+      body: requestBody,
     });
 
     if (!res.ok) {
@@ -514,13 +517,123 @@ export class ClientAPI {
     );
   }
 
-  getUploadUrl(serverId: string) {
+  getUploadUrl(serverId: string, directory = "/") {
     return this.http.get<{ attributes: { url: string } }>(
       `${this.base}/servers/${serverId}/files/upload`,
+      { directory },
     );
   }
 
-  writeFile(serverId: string, file: string, content: string) {
+  async uploadFiles(
+    serverId: string,
+    directory: string,
+    files: { path: string; content: Uint8Array }[],
+    directories: string[] = [],
+  ) {
+    const normalizeRelativePath = (input: string) => {
+      const path = input.replaceAll("\\", "/");
+      if (!path || path.startsWith("/") || path.includes("\0")) {
+        throw new Error(`Invalid relative upload path: ${input}`);
+      }
+
+      const parts = path.split("/");
+      if (parts.some((part) => !part || part === "." || part === "..")) {
+        throw new Error(`Invalid relative upload path: ${input}`);
+      }
+      return parts.join("/");
+    };
+
+    const targetDirectory = `/${directory
+      .replaceAll("\\", "/")
+      .split("/")
+      .filter(Boolean)
+      .join("/")}`;
+    if (directory.includes("\0") || directory.split(/[\\/]/).includes("..")) {
+      throw new Error("Upload directory must not contain parent-directory segments");
+    }
+
+    const normalizedFiles = files.map(({ path, content }) => ({
+      path: normalizeRelativePath(path),
+      content,
+    }));
+    const normalizedDirectories = directories.map(normalizeRelativePath);
+
+    const allDirectories = new Set<string>();
+    const addDirectoryAndParents = (path: string) => {
+      const parts = path.split("/");
+      for (let i = 1; i <= parts.length; i += 1) {
+        allDirectories.add(parts.slice(0, i).join("/"));
+      }
+    };
+    for (const path of normalizedDirectories) {
+      addDirectoryAndParents(path);
+    }
+    for (const { path } of normalizedFiles) {
+      const parts = path.split("/");
+      parts.pop();
+      if (parts.length > 0) addDirectoryAndParents(parts.join("/"));
+    }
+
+    // Create nested/empty folders before sending their contents. Checking the
+    // parent listing makes retries safe when a folder already exists.
+    for (const relativeDirectory of [...allDirectories].sort(
+      (a, b) => a.split("/").length - b.split("/").length,
+    )) {
+      const parentParts = relativeDirectory.split("/");
+      const name = parentParts.pop()!;
+      const parent = parentParts.length
+        ? `${targetDirectory === "/" ? "" : targetDirectory}/${parentParts.join("/")}` || "/"
+        : targetDirectory;
+      const existing = await this.listFiles(serverId, parent);
+      if (existing.data.some((item) => item.attributes.name === name && !item.attributes.is_file)) {
+        continue;
+      }
+      await this.createFolder(serverId, parent, name);
+    }
+
+    if (normalizedFiles.length === 0) {
+      return { uploaded: 0, directories: allDirectories.size };
+    }
+
+    const filesByDirectory = new Map<string, typeof normalizedFiles>();
+    for (const file of normalizedFiles) {
+      const parts = file.path.split("/");
+      const name = parts.pop()!;
+      const relativeDirectory = parts.join("/");
+      const remoteDirectory = relativeDirectory
+        ? `${targetDirectory === "/" ? "" : targetDirectory}/${relativeDirectory}` || "/"
+        : targetDirectory;
+      const group = filesByDirectory.get(remoteDirectory) ?? [];
+      group.push({ path: name, content: file.content });
+      filesByDirectory.set(remoteDirectory, group);
+    }
+
+    for (const [remoteDirectory, directoryFiles] of filesByDirectory) {
+      const uploadUrlResponse = await this.getUploadUrl(serverId, remoteDirectory);
+      const uploadUrl = uploadUrlResponse.attributes?.url;
+      if (!uploadUrl) {
+        throw new Error(`Pterodactyl did not return an upload URL for ${remoteDirectory}`);
+      }
+      const form = new FormData();
+      for (const file of directoryFiles) {
+        const bytes = new Uint8Array(file.content.byteLength);
+        bytes.set(file.content);
+        form.append("files[]", new Blob([bytes.buffer]), file.path);
+      }
+
+      const response = await fetch(uploadUrl, { method: "POST", body: form });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(
+          `File upload to ${remoteDirectory} failed (${response.status}): ${detail || response.statusText}`,
+        );
+      }
+    }
+
+    return { uploaded: normalizedFiles.length, directories: allDirectories.size };
+  }
+
+  writeFile(serverId: string, file: string, content: string | Uint8Array) {
     return this.http.postRaw(
       `${this.base}/servers/${serverId}/files/write`,
       content,
@@ -576,7 +689,7 @@ export class ClientAPI {
   chmodFiles(
     serverId: string,
     root: string,
-    files: { file: string; mode: number }[],
+    files: { file: string; mode: string }[],
   ) {
     return this.http.post(`${this.base}/servers/${serverId}/files/chmod`, {
       root,

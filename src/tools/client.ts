@@ -23,6 +23,19 @@ export function registerClientTools(
   );
 
   server.tool(
+    "get_account_activity",
+    "Get activity history for the authenticated account",
+    { page: z.number().int().positive().optional(), per_page: z.number().int().positive().optional() },
+    async (query) => {
+      try {
+        return json(attrsList(await ptero.client.getAccountActivity(query)));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
     "get_server",
     "Get details of a game server by its short identifier",
     { server_id: z.string().describe("Server identifier (short ID, e.g. 'abc123')") },
@@ -137,17 +150,96 @@ export function registerClientTools(
   );
 
   server.tool(
+    "get_file_download_url",
+    "Get a temporary download URL for a server file",
+    {
+      server_id: z.string().describe("Server identifier"),
+      file: z.string().describe("File path on the server"),
+    },
+    async ({ server_id, file }) => {
+      try {
+        const result = await ptero.client.getDownloadUrl(server_id, file);
+        return json({ url: result.attributes.url });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
     "write_file",
-    "Write content to a file on the server (creates or overwrites)",
+    "Write exact file contents on the server (creates or overwrites). Pass plain content without JSON.stringify or wrapper quotes. Use content_base64 to preserve exact bytes and line endings, or set content_json_encoded=true only when content itself is a JSON-encoded string.",
     {
       server_id: z.string().describe("Server identifier"),
       file: z.string().describe("File path"),
-      content: z.string().describe("File content to write"),
+      content: z.string().optional().describe("Raw file contents, including actual newline characters"),
+      content_base64: z.string().optional().describe("Optional exact file bytes encoded as standard base64; mutually exclusive with content"),
+      content_json_encoded: z.boolean().optional().default(false).describe("Set true only if content is wrapped/escaped as a JSON string, to decode that wrapper before writing"),
     },
-    async ({ server_id, file, content }) => {
+    async ({ server_id, file, content, content_base64, content_json_encoded }) => {
       try {
-        await ptero.client.writeFile(server_id, file, content);
-        return json({ success: true, file });
+        if ((content === undefined) === (content_base64 === undefined)) {
+          throw new Error("Provide exactly one of content or content_base64");
+        }
+
+        let fileContent: string | Uint8Array;
+        if (content_base64 !== undefined) {
+          if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64)) {
+            throw new Error("content_base64 must be valid standard base64");
+          }
+          fileContent = Buffer.from(content_base64, "base64");
+        } else if (content_json_encoded) {
+          try {
+            const decoded: unknown = JSON.parse(content!);
+            if (typeof decoded !== "string") {
+              throw new Error("JSON content must encode a string");
+            }
+            fileContent = decoded;
+          } catch (cause) {
+            throw new Error(`Could not decode JSON-encoded content: ${cause instanceof Error ? cause.message : String(cause)}`);
+          }
+        } else {
+          fileContent = content!;
+        }
+
+        await ptero.client.writeFile(server_id, file, fileContent);
+        const bytesWritten = typeof fileContent === "string"
+          ? Buffer.byteLength(fileContent, "utf8")
+          : fileContent.byteLength;
+        return json({ success: true, file, bytes_written: bytesWritten });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "upload_files",
+    "Upload files and folders to a server. File contents must be base64-encoded; relative paths preserve the folder structure. Empty folders can be provided separately.",
+    {
+      server_id: z.string().describe("Server identifier"),
+      directory: z.string().default("/").describe("Existing destination directory on the server"),
+      files: z.array(z.object({
+        path: z.string().min(1).describe("Relative file path, e.g. plugins/example.jar"),
+        content_base64: z.string().describe("File bytes encoded as standard base64"),
+      })).default([]),
+      directories: z.array(z.string().min(1)).default([]).describe("Relative folder paths, including empty folders"),
+    },
+    async ({ server_id, directory, files, directories }) => {
+      try {
+        const decodedFiles = files.map(({ path, content_base64 }) => {
+          if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64)) {
+            throw new Error(`File ${path} has invalid base64 content`);
+          }
+          return { path, content: Buffer.from(content_base64, "base64") };
+        });
+        const result = await ptero.client.uploadFiles(
+          server_id,
+          directory,
+          decodedFiles,
+          directories,
+        );
+        return json({ success: true, ...result, directory });
       } catch (e) {
         return error(e);
       }
@@ -239,6 +331,31 @@ export function registerClientTools(
       try {
         await ptero.client.deleteFiles(server_id, root, files);
         return json({ success: true });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "chmod_files",
+    "Change permissions for files and folders on the server",
+    {
+      server_id: z.string().describe("Server identifier"),
+      root: z.string().describe("Root directory containing the files"),
+      files: z.array(z.object({
+        file: z.string().describe("File or folder name relative to root"),
+        mode: z.string().regex(/^[0-7]{3,4}$/).describe("Unix permission mode in octal, e.g. 0644 or 0755"),
+      })),
+    },
+    async ({ server_id, root, files }) => {
+      try {
+        await ptero.client.chmodFiles(
+          server_id,
+          root,
+          files,
+        );
+        return json({ success: true, updated: files.length });
       } catch (e) {
         return error(e);
       }
@@ -480,7 +597,7 @@ export function registerClientTools(
       schedule_id: z.number().describe("Schedule ID"),
       action: z.enum(["command", "power", "backup"]),
       payload: z.string().describe("Command text, power signal, or empty for backup"),
-      time_offset: z.number().describe("Seconds after schedule trigger"),
+      time_offset: z.number().int().nonnegative().describe("Seconds after schedule trigger"),
       continue_on_failure: z.boolean().optional(),
     },
     async ({ server_id, schedule_id, ...params }) => {
@@ -494,6 +611,32 @@ export function registerClientTools(
             ),
           ),
         );
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "update_schedule_task",
+    "Update an existing schedule task",
+    {
+      server_id: z.string().describe("Server identifier"),
+      schedule_id: z.number().describe("Schedule ID"),
+      task_id: z.number().describe("Task ID"),
+      action: z.enum(["command", "power", "backup"]).optional(),
+      payload: z.string().optional().describe("Command text, power signal, or empty for backup"),
+      time_offset: z.number().int().nonnegative().optional().describe("Seconds after schedule trigger"),
+      continue_on_failure: z.boolean().optional(),
+    },
+    async ({ server_id, schedule_id, task_id, ...params }) => {
+      try {
+        return json(attrs(await ptero.client.updateScheduleTask(
+          server_id,
+          schedule_id,
+          task_id,
+          params,
+        )));
       } catch (e) {
         return error(e);
       }
@@ -557,6 +700,57 @@ export function registerClientTools(
     },
   );
 
+  server.tool(
+    "create_allocation",
+    "Allocate an additional port to a server",
+    { server_id: z.string().describe("Server identifier") },
+    async ({ server_id }) => {
+      try {
+        return json(attrs(await ptero.client.createAllocation(server_id)));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "update_allocation",
+    "Update notes for a server network allocation",
+    {
+      server_id: z.string().describe("Server identifier"),
+      allocation_id: z.number().describe("Allocation ID"),
+      notes: z.string().describe("Allocation notes; provide an empty string to clear"),
+    },
+    async ({ server_id, allocation_id, notes }) => {
+      try {
+        return json(attrs(await ptero.client.updateAllocation(
+          server_id,
+          allocation_id,
+          notes,
+        )));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "delete_allocation",
+    "Remove an additional network allocation from a server",
+    {
+      server_id: z.string().describe("Server identifier"),
+      allocation_id: z.number().describe("Allocation ID"),
+    },
+    async ({ server_id, allocation_id }) => {
+      try {
+        await ptero.client.deleteAllocation(server_id, allocation_id);
+        return json({ success: true });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
   // ─── Subusers ──────────────────────────────────────────────────────
 
   server.tool(
@@ -606,6 +800,22 @@ export function registerClientTools(
             await ptero.client.updateSubuser(server_id, user_id, permissions),
           ),
         );
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "get_subuser",
+    "Get a subuser and their permissions for a server",
+    {
+      server_id: z.string().describe("Server identifier"),
+      user_id: z.string().describe("Subuser UUID"),
+    },
+    async ({ server_id, user_id }) => {
+      try {
+        return json(attrs(await ptero.client.getSubuser(server_id, user_id)));
       } catch (e) {
         return error(e);
       }
@@ -869,6 +1079,44 @@ export function registerClientTools(
   );
 
   server.tool(
+    "update_account_email",
+    "Change the authenticated account email (requires current password)",
+    {
+      email: z.string().email(),
+      password: z.string().describe("Current account password"),
+    },
+    async ({ email, password }) => {
+      try {
+        await ptero.client.updateEmail(email, password);
+        return json({ success: true, email });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "update_account_password",
+    "Change the authenticated account password",
+    {
+      current_password: z.string(),
+      password: z.string().min(8),
+      password_confirmation: z.string().min(8),
+    },
+    async (params) => {
+      try {
+        if (params.password !== params.password_confirmation) {
+          throw new Error("password and password_confirmation must match");
+        }
+        await ptero.client.updatePassword(params.current_password, params.password, params.password_confirmation);
+        return json({ success: true });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
     "list_api_keys",
     "List API keys for the authenticated account",
     {},
@@ -912,4 +1160,48 @@ export function registerClientTools(
       }
     },
   );
+
+  server.tool(
+    "list_ssh_keys",
+    "List SSH public keys on the authenticated account",
+    {},
+    async () => {
+      try {
+        return json(attrsList(await ptero.client.listSshKeys()));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "add_ssh_key",
+    "Add an SSH public key to the authenticated account",
+    {
+      name: z.string().min(1),
+      public_key: z.string().min(1),
+    },
+    async ({ name, public_key }) => {
+      try {
+        return json(await ptero.client.addSshKey(name, public_key));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "remove_ssh_key",
+    "Remove an SSH public key from the authenticated account",
+    { fingerprint: z.string().describe("SSH key fingerprint") },
+    async ({ fingerprint }) => {
+      try {
+        await ptero.client.removeSshKey(fingerprint);
+        return json({ success: true });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
 }

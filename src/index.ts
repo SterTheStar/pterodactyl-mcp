@@ -27,6 +27,7 @@ function getPort(): number {
 const PTERO_URL = process.env.PTERODACTYL_URL;
 const PTERO_APP_KEY = process.env.PTERODACTYL_APP_KEY;
 const PTERO_CLIENT_KEY = process.env.PTERODACTYL_CLIENT_KEY;
+const MCP_JSON_LIMIT = process.env.MCP_JSON_LIMIT ?? "50mb";
 
 if (!PTERO_URL) {
   console.error("Missing PTERODACTYL_URL environment variable.");
@@ -84,7 +85,7 @@ async function startStdio() {
 
 function startHttp() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: MCP_JSON_LIMIT }));
 
   const transports = new Map<string, StreamableHTTPServerTransport>();
 

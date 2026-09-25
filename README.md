@@ -5,7 +5,7 @@ MCP server for managing [Pterodactyl Panel](https://pterodactyl.io) servers. Sup
 ## Features
 
 - **Admin tools** (application API) — manage users, servers, nodes, locations, nests, eggs, databases, and allocations
-- **Client tools** (client API) — control servers, manage files, backups, schedules, subusers, databases, startup variables, and network allocations
+- **Client tools** (client API) — control servers, manage files, backups, schedules and tasks, subusers, databases, startup variables, network allocations, and account/API/SSH keys
 - **WebSocket console** — real-time server console streaming via Pterodactyl's websocket API
 
 ## Setup
@@ -30,8 +30,31 @@ cp .env.example .env
 | `PTERODACTYL_APP_KEY` | Application API key (`ptla_*`) for admin operations (optional) |
 | `PTERODACTYL_CLIENT_KEY` | Client API key (`ptlc_*`) for client operations (optional) |
 | `PORT` | HTTP server port (default: `3000`) |
+| `MCP_JSON_LIMIT` | Maximum JSON request size for HTTP transport (default: `50mb`; increase for larger uploads) |
 
 At least one API key is required. You can use both to enable all tools.
+
+## Uploading files and folders
+
+The `upload_files` client tool uploads binary files to a server. Provide file bytes as standard base64 and use relative paths to preserve nested folders. Folder paths can also be supplied explicitly, which is useful for creating empty directories. The destination directory must already exist. Upload URLs are requested individually for each destination directory, as required by the panel's signed upload endpoint.
+
+Example tool arguments:
+
+```json
+{
+  "server_id": "abc123",
+  "directory": "/",
+  "files": [
+    { "path": "plugins/example.jar", "content_base64": "<base64 file bytes>" },
+    { "path": "config/settings.yml", "content_base64": "<base64 file bytes>" }
+  ],
+  "directories": ["empty-folder"]
+}
+```
+
+Files are uploaded through Pterodactyl's temporary upload URL in groups by destination folder. Large uploads may require increasing `MCP_JSON_LIMIT`; the configured limit applies to HTTP transport requests.
+
+For `write_file`, pass `content` as the plain text to write, with real newline characters (do not JSON-stringify it). To preserve exact file bytes and line endings, pass `content_base64` instead. If a client has already wrapped the text as a JSON string, set `content_json_encoded` to `true` to decode that string before writing.
 
 ### 3. Run
 

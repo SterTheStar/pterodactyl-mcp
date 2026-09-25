@@ -41,7 +41,7 @@ class ServerWebSocket {
     private panelOrigin: string,
     maxHistory = 2000,
   ) {
-    this.maxHistory = maxHistory;
+    this.maxHistory = Math.max(1, Math.floor(maxHistory));
   }
 
   async connect(): Promise<void> {
@@ -58,12 +58,13 @@ class ServerWebSocket {
     return new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(socket, {
         origin: this.panelOrigin,
-        rejectUnauthorized: false,
       });
       let authed = false;
+      let settled = false;
 
       const timeout = setTimeout(() => {
-        if (!authed) {
+        if (!settled) {
+          settled = true;
           ws.close();
           reject(new Error("WebSocket auth timeout (10s)"));
         }
@@ -87,6 +88,7 @@ class ServerWebSocket {
           case "auth success":
             if (!authed) {
               authed = true;
+              settled = true;
               clearTimeout(timeout);
               this.ws = ws;
               this.connectedAt = Date.now();
@@ -131,12 +133,18 @@ class ServerWebSocket {
 
       ws.on("error", (err) => {
         if (!authed) {
+          settled = true;
           clearTimeout(timeout);
           reject(err);
         }
       });
 
       ws.on("close", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(new Error("WebSocket closed before authentication completed"));
+        }
         this.cleanup();
       });
     });

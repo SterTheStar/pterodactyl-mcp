@@ -14,6 +14,8 @@ export function registerWebSocketTools(
       server_id: z.string().describe("Server identifier (short ID)"),
       max_history: z
         .number()
+        .int()
+        .positive()
         .optional()
         .describe("Maximum lines to retain in buffer (default 2000)"),
     },
@@ -68,10 +70,14 @@ export function registerWebSocketTools(
       server_id: z.string().describe("Server identifier (short ID)"),
       lines: z
         .number()
+        .int()
+        .positive()
         .optional()
         .describe("Number of recent lines to return (default: all)"),
       since: z
         .number()
+        .int()
+        .nonnegative()
         .optional()
         .describe("Only return entries after this Unix timestamp (ms)"),
       type: z
@@ -173,6 +179,9 @@ export function registerWebSocketTools(
       command: z.string().describe("Console command to execute"),
       wait_ms: z
         .number()
+        .int()
+        .min(0)
+        .max(10000)
         .optional()
         .describe("Milliseconds to wait for output after sending (default 1000)"),
     },
@@ -182,7 +191,7 @@ export function registerWebSocketTools(
         const before = Date.now();
         conn.sendCommand(command);
 
-        const delay = Math.min(wait_ms ?? 1000, 10000);
+        const delay = wait_ms ?? 1000;
         await new Promise((r) => setTimeout(r, delay));
 
         const entries = conn.getHistory({ since: before, type: "output" });

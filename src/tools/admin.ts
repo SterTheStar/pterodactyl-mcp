@@ -36,6 +36,19 @@ export function registerAdminTools(
   );
 
   server.tool(
+    "admin_get_user_by_external_id",
+    "Get a panel user by external ID (admin)",
+    { external_id: z.string().describe("External user ID") },
+    async ({ external_id }) => {
+      try {
+        return json(attrs(await ptero.application.getUserByExternalId(external_id)));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
     "admin_create_user",
     "Create a new panel user (admin)",
     {
@@ -168,6 +181,7 @@ export function registerAdminTools(
       upload_size: z.number().optional(),
       daemon_sftp: z.number().optional(),
       daemon_listen: z.number().optional(),
+      daemon_base: z.string().optional(),
       description: z.string().optional(),
       public: z.boolean().optional(),
       behind_proxy: z.boolean().optional(),
@@ -370,6 +384,19 @@ export function registerAdminTools(
   );
 
   server.tool(
+    "admin_get_server_by_external_id",
+    "Get full server details by external ID (admin)",
+    { external_id: z.string().describe("External server ID") },
+    async ({ external_id }) => {
+      try {
+        return json(attrs(await ptero.application.getServerByExternalId(external_id)));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
     "admin_create_server",
     "Create a new game server (admin)",
     {
@@ -396,7 +423,12 @@ export function registerAdminTools(
       allocation: z.object({
         default: z.number().describe("Default allocation ID"),
         additional: z.array(z.number()).optional(),
-      }),
+      }).optional(),
+      deploy: z.object({
+        locations: z.array(z.number()).min(1),
+        dedicated_ip: z.boolean(),
+        port_range: z.array(z.string()).optional(),
+      }).optional().describe("Automatically select allocations from these locations instead of specifying allocation.default"),
       description: z.string().optional(),
       external_id: z.string().optional(),
       start_on_completion: z.boolean().optional(),
@@ -452,6 +484,7 @@ export function registerAdminTools(
           backups: z.number().optional(),
         })
         .optional(),
+      allocation_additional: z.array(z.number()).optional().describe("Additional allocation IDs"),
       oom_disabled: z.boolean().optional(),
     },
     async ({ id, ...params }) => {
@@ -475,6 +508,7 @@ export function registerAdminTools(
       egg: z.number().optional(),
       image: z.string().optional(),
       skip_scripts: z.boolean().optional(),
+      docker_image: z.string().optional(),
     },
     async ({ id, ...params }) => {
       try {
@@ -594,6 +628,38 @@ export function registerAdminTools(
       try {
         await ptero.application.deleteServerDatabase(server_id, database_id);
         return json({ success: true });
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "admin_get_server_database",
+    "Get a server database by ID (admin)",
+    {
+      server_id: z.number().describe("Server internal ID"),
+      database_id: z.number().describe("Database ID"),
+    },
+    async ({ server_id, database_id }) => {
+      try {
+        return json(attrs(await ptero.application.getServerDatabase(server_id, database_id)));
+      } catch (e) {
+        return error(e);
+      }
+    },
+  );
+
+  server.tool(
+    "admin_reset_server_database_password",
+    "Reset a server database password (admin)",
+    {
+      server_id: z.number().describe("Server internal ID"),
+      database_id: z.number().describe("Database ID"),
+    },
+    async ({ server_id, database_id }) => {
+      try {
+        return json(await ptero.application.resetServerDatabasePassword(server_id, database_id));
       } catch (e) {
         return error(e);
       }

@@ -203,14 +203,14 @@ export interface CreateServerParams {
     allocations: number;
     backups: number;
   };
-  allocation: {
+  allocation?: {
     default: number;
     additional?: number[];
   };
   deploy?: {
     locations: number[];
     dedicated_ip: boolean;
-    port_range: string[];
+    port_range?: string[];
   };
   description?: string;
   external_id?: string;
@@ -228,6 +228,7 @@ export interface UpdateServerDetailsParams {
 
 export interface UpdateServerBuildParams {
   allocation?: number;
+  allocation_additional?: number[];
   memory?: number;
   swap?: number;
   disk?: number;
@@ -244,6 +245,7 @@ export interface UpdateServerStartupParams {
   egg?: number;
   image?: string;
   skip_scripts?: boolean;
+  docker_image?: string;
 }
 
 export interface AppDatabase {
